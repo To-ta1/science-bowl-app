@@ -1,0 +1,53 @@
+services:
+  - type: web
+    name: fossil-ridge-science-bowl
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.5
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: APP_SECRET_KEY
+        sync: false
+      - key: GITHUB_REPOSITORY
+        sync: false
+      - key: GITHUB_BRANCH
+        value: main
+      - key: GITHUB_QUIZZES_PATH
+        value: quizzes
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: QUIZ_CACHE_SECONDS
+        value: "120"
+      - key: BUZZ_AUDIO_STOP_MIN_MS
+        value: "200"
+      - key: BUZZ_AUDIO_STOP_MAX_MS
+        value: "500"
+      - key: BUZZ_END_WINDOW_MS
+        value: "500"
+      - key: B2_ENDPOINT
+        sync: false
+      - key: B2_REGION
+        value: us-west-004
+      - key: B2_BUCKET_NAME
+        sync: false
+      - key: B2_KEY_ID
+        sync: false
+      - key: B2_APPLICATION_KEY
+        sync: false
+      - key: B2_PREFIX
+        value: fossil-science-bowl
+      - key: B2_BACKUP_INITIAL_DELAY_SECONDS
+        value: "90"
+      - key: B2_BACKUP_QUIET_PERIOD_SECONDS
+        value: "300"
