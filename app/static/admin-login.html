@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Administrator | Fossil Ridge Science Bowl</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="site-header"><div class="header-inner"><a class="wordmark" href="/">Fossil Ridge Science Bowl</a><span class="header-note">Administrator</span></div></header>
+  <main class="page-shell">
+    <section class="panel narrow-panel">
+      <p class="eyebrow">Administrator access</p>
+      <h1>Sign in</h1>
+      <p class="muted">Enter the administrator credentials configured for this site.</p>
+      <form id="login-form" class="stack">
+        <label for="username">Username</label><input id="username" autocomplete="username" required>
+        <label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required>
+        <button class="button primary" type="submit">Sign in</button>
+      </form>
+      <p id="login-error" class="error-text" role="alert"></p>
+    </section>
+  </main>
+  <footer class="site-footer"><span>Fossil Ridge Science Bowl</span><a href="/">Student page</a></footer>
+  <script>
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const out = document.getElementById('login-error');
+      out.textContent = 'Signing in…';
+      try {
+        const response = await fetch('/api/admin/login', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({username: document.getElementById('username').value, password: document.getElementById('password').value})
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Login failed.');
+        location.href = '/admin';
+      } catch (err) { out.textContent = err.message; }
+    });
+  </script>
+</body>
+</html>

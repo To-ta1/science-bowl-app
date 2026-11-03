@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fossil Ridge Science Bowl</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="wordmark" href="/" aria-label="Fossil Ridge Science Bowl home">Fossil Ridge Science Bowl</a>
+      <span class="header-note">Science Bowl practice</span>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section id="name-panel" class="panel narrow-panel hidden">
+      <p class="eyebrow">Welcome</p>
+      <h1>Before you begin</h1>
+      <p class="muted">Enter your name. This browser will remember it for next time.</p>
+      <form id="name-form" class="stack">
+        <label for="student-name">Your name</label>
+        <input id="student-name" name="name" maxlength="100" autocomplete="name" required placeholder="First and last name">
+        <button class="button primary" type="submit">Continue</button>
+      </form>
+      <p id="name-error" class="error-text" role="alert"></p>
+    </section>
+
+    <section id="home-panel" class="hidden">
+      <div class="home-intro">
+        <div>
+          <p class="eyebrow">Student area</p>
+          <h1 id="welcome-heading">Choose a quiz</h1>
+          <p class="muted">Your name is saved on this device. Each quiz can only be submitted once under a name.</p>
+        </div>
+        <button id="change-name" class="button quiet" type="button">Change name</button>
+      </div>
+      <div id="quiz-list" class="quiz-list" aria-live="polite"></div>
+      <p id="home-error" class="error-text" role="alert"></p>
+    </section>
+
+    <section id="quiz-panel" class="hidden">
+      <div class="quiz-topline">
+        <span id="quiz-title-label" class="eyebrow">Quiz</span>
+        <span id="question-position" class="muted small"></span>
+      </div>
+      <div class="question-panel">
+        <p id="question-number" class="question-number">Question 1</p>
+        <h1 id="question-prompt" class="question-prompt">Question 1</h1>
+        <div id="audio-status" class="audio-status hidden" aria-live="polite">
+          <span class="audio-dot"></span><span id="audio-status-text">Listen to the question.</span>
+        </div>
+        <button id="play-audio" class="button secondary hidden" type="button">Play / resume audio</button>
+        <div id="buzz-area" class="buzz-area">
+          <p id="buzz-instruction" class="muted">Press the space bar when you want to buzz.</p>
+          <div class="keyboard-hint"><kbd>SPACE</kbd><span>Buzz</span></div>
+        </div>
+        <div id="answer-area" class="answer-area hidden">
+          <div class="answer-heading">
+            <label for="answer-input">Your answer</label>
+            <span id="answer-time-label" class="answer-time-label">Answer now</span>
+          </div>
+          <input id="answer-input" type="text" maxlength="10000" autocomplete="off" spellcheck="false" placeholder="Type your answer, then press Enter">
+          <p class="muted small">Press Enter to submit. Your answer is also submitted when time runs out.</p>
+          <p id="saving-message" class="muted small" aria-live="polite"></p>
+        </div>
+        <div id="transition-area" class="transition-area hidden" aria-live="polite">
+          <p id="transition-message">Next question…</p>
+        </div>
+      </div>
+      <p id="quiz-error" class="error-text" role="alert"></p>
+      <button id="exit-quiz" class="button quiet" type="button">Return to quiz list</button>
+    </section>
+
+    <section id="complete-panel" class="panel narrow-panel hidden">
+      <p class="eyebrow">Finished</p>
+      <h1>Quiz submitted</h1>
+      <p class="muted">Your responses have been saved. This quiz cannot be taken again under the same name.</p>
+      <button id="back-to-quizzes" class="button primary" type="button">Back to quizzes</button>
+    </section>
+
+    <div id="desktop-warning" class="desktop-warning hidden">This quiz application is designed for desktop computers. Please use a computer with a physical keyboard.</div>
+  </main>
+
+  <footer class="site-footer">
+    <span>Fossil Ridge Science Bowl</span>
+    <a href="/admin">Administrator</a>
+  </footer>
+
+  <script src="/static/student.js" defer></script>
+</body>
+</html>
