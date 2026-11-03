@@ -1,0 +1,28 @@
+{
+  "slug": "example-quiz",
+  "title": "Example Quiz \u2014 replace this",
+  "description": "A small example showing the quiz format. Replace these sample questions with your own.",
+  "inter_question_delay_seconds": 2,
+  "questions": [
+    {
+      "id": "q1",
+      "prompt": "Question 1",
+      "audio": null,
+      "pre_buzz": {
+        "mode": "from_question_start",
+        "seconds": 20
+      },
+      "answer_seconds": 8
+    },
+    {
+      "id": "q2",
+      "prompt": "Question 2 (example audio)",
+      "audio": "audio/demo-tone.wav",
+      "pre_buzz": {
+        "mode": "after_audio",
+        "seconds": 5
+      },
+      "answer_seconds": 8
+    }
+  ]
+}
