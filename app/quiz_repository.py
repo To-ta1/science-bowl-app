@@ -175,6 +175,10 @@ class QuizRepository:
             if not 1 <= answer_seconds <= 300:
                 raise QuizRepositoryError(f"{folder_slug}: answer_seconds for {qid} must be between 1 and 300.")
 
+            pre_buzz_warnings = QuizRepository._validate_timer_warnings(
+                pre.get("warnings"), folder_slug, qid, "pre_buzz", seconds
+            )
+
             answer_timer = item.get("answer_timer", {})
             if not isinstance(answer_timer, dict):
                 raise QuizRepositoryError(f"{folder_slug}: answer_timer for {qid} must be an object.")
@@ -188,14 +192,24 @@ class QuizRepository:
                 raise QuizRepositoryError(f"{folder_slug}: answer_timer.typing_buffer_ms for {qid} must be an integer.")
             if not 0 <= typing_buffer_ms <= 1000:
                 raise QuizRepositoryError(f"{folder_slug}: answer_timer.typing_buffer_ms for {qid} must be between 0 and 1000.")
+            answer_warnings = QuizRepository._validate_timer_warnings(
+                answer_timer.get("warnings"), folder_slug, qid, "answer_timer", answer_seconds
+            )
+
+            normalized_pre_buzz = {"mode": mode, "seconds": seconds}
+            if pre_buzz_warnings is not None:
+                normalized_pre_buzz["warnings"] = pre_buzz_warnings
+            normalized_answer_timer = {"mode": answer_timer_mode, "typing_buffer_ms": typing_buffer_ms}
+            if answer_warnings is not None:
+                normalized_answer_timer["warnings"] = answer_warnings
 
             normalized_questions.append({
                 "id": qid,
                 "prompt": prompt,
                 "audio": audio,
-                "pre_buzz": {"mode": mode, "seconds": seconds},
+                "pre_buzz": normalized_pre_buzz,
                 "answer_seconds": answer_seconds,
-                "answer_timer": {"mode": answer_timer_mode, "typing_buffer_ms": typing_buffer_ms},
+                "answer_timer": normalized_answer_timer,
             })
 
         result = {
@@ -208,6 +222,50 @@ class QuizRepository:
         if password is not None:
             result["password"] = password
         return result
+
+    @staticmethod
+    def _validate_timer_warnings(raw: Any, folder_slug: str, qid: str, timer_name: str, timer_seconds: float) -> dict:
+        """Validate optional visible/sound warnings for a countdown timer."""
+        if raw is None:
+            return None
+        if not isinstance(raw, dict):
+            raise QuizRepositoryError(f"{folder_slug}: {timer_name}.warnings for {qid} must be an object.")
+
+        times = raw.get("at_seconds", [])
+        if not isinstance(times, list) or len(times) > 12:
+            raise QuizRepositoryError(f"{folder_slug}: {timer_name}.warnings.at_seconds for {qid} must be an array of at most 12 values.")
+        normalized_times: list[float] = []
+        for value in times:
+            try:
+                seconds_left = float(value)
+            except (TypeError, ValueError):
+                raise QuizRepositoryError(f"{folder_slug}: timer warning times for {qid} must be numeric.")
+            if not 0 < seconds_left <= timer_seconds:
+                raise QuizRepositoryError(
+                    f"{folder_slug}: timer warning times for {qid} must be greater than 0 and no greater than {timer_seconds:g} seconds."
+                )
+            if seconds_left in normalized_times:
+                raise QuizRepositoryError(f"{folder_slug}: timer warning times for {qid} cannot contain duplicates.")
+            normalized_times.append(seconds_left)
+
+        sound = str(raw.get("sound", "double_beep"))
+        allowed_sounds = {"short_beep", "double_beep", "high_beep", "low_beep", "triple_beep"}
+        if sound not in allowed_sounds:
+            raise QuizRepositoryError(
+                f"{folder_slug}: {timer_name}.warnings.sound for {qid} must be one of {', '.join(sorted(allowed_sounds))}."
+            )
+        try:
+            volume = float(raw.get("volume", 0.8))
+        except (TypeError, ValueError):
+            raise QuizRepositoryError(f"{folder_slug}: {timer_name}.warnings.volume for {qid} must be numeric.")
+        if not 0 <= volume <= 1:
+            raise QuizRepositoryError(f"{folder_slug}: {timer_name}.warnings.volume for {qid} must be between 0 and 1.")
+
+        return {
+            "at_seconds": sorted(normalized_times, reverse=True),
+            "sound": sound,
+            "volume": volume,
+        }
 
     def _load_local_quiz(self, slug: str) -> dict:
         assert self.local_root is not None
