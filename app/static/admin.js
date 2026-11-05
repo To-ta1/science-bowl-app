@@ -83,6 +83,7 @@
         if(r.time_to_buzz_ms!=null)meta.push(`Time to buzz: ${fmtMs(r.time_to_buzz_ms)}`);
         if(r.answer_time_ms!=null)meta.push(`Answer time: ${fmtMs(r.answer_time_ms)}`);
         if(r.total_question_time_ms!=null)meta.push(`Total: ${fmtMs(r.total_question_time_ms)}`);
+        meta.push(`Keystrokes: ${Number(r.keystroke_count || 0)}`);
         if(r.audio_duration_ms!=null && r.audio_remaining_at_buzz_ms!=null) {
           if(r.buzz_before_audio_end) meta.push(`${fmtMs(r.audio_remaining_at_buzz_ms)} before audio ended`);
           else meta.push('Buzz after audio ended');

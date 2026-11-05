@@ -29,6 +29,11 @@
     timerTick: null,
     heartbeatTick: null,
     answerTimerBase: 0,
+    answerKeystrokes: 0,
+    answerTimerRemainingMs: 0,
+    answerTimerLastPerf: 0,
+    answerTimerPaused: false,
+    answerTimerPauseUntil: 0,
     phase: "home",
     submitting: false,
     buzzPending: false,
@@ -113,7 +118,7 @@
           status.textContent = `${quiz.question_count} questions`;
           button.textContent = "Start quiz";
         }
-        button.addEventListener("click", () => openQuiz(quiz.slug, button));
+        button.addEventListener("click", () => openQuiz(quiz, button));
         footer.append(status, button);
         card.append(title, description, footer);
         $("quiz-list").append(card);
@@ -123,13 +128,18 @@
     }
   }
 
-  async function openQuiz(slug, button) {
+  async function openQuiz(quiz, button) {
     clearError();
+    let password;
+    if (quiz.password_required) {
+      password = window.prompt(`Enter the password for \"${quiz.title}\":`);
+      if (password === null) return;
+    }
     button.disabled = true;
     button.textContent = "Opening…";
     try {
       const data = await api("/api/attempts", {
-        method: "POST", body: JSON.stringify({ participant_id: state.participantId, quiz_slug: slug })
+        method: "POST", body: JSON.stringify({ participant_id: state.participantId, quiz_slug: quiz.slug, password })
       });
       if (data.status === "completed") {
         localStorage.removeItem(STORAGE.attempt);
@@ -339,8 +349,53 @@
     return state.questionElapsedBase + (state.questionClockStarted ? Math.max(0, performance.now() - state.questionClockPerf) : 0);
   }
 
+  function updateTypingAnswerTimer(now = performance.now()) {
+    if (state.timerKind !== "answer" || state.answerTimerLastPerf === 0) return;
+    if (state.answerTimerPaused) {
+      if (now >= state.answerTimerPauseUntil) {
+        state.answerTimerRemainingMs -= Math.max(0, now - state.answerTimerPauseUntil);
+        state.answerTimerPaused = false;
+        state.answerTimerPauseUntil = 0;
+      }
+    } else {
+      state.answerTimerRemainingMs -= Math.max(0, now - state.answerTimerLastPerf);
+    }
+    state.answerTimerLastPerf = now;
+  }
+
+  function startTypingAwareCountdown(remainingMs) {
+    state.timerKind = "answer";
+    state.timerDeadline = null;
+    state.answerTimerRemainingMs = Math.max(0, Number(remainingMs || 0));
+    state.answerTimerLastPerf = performance.now();
+    state.answerTimerPaused = false;
+    state.answerTimerPauseUntil = 0;
+    let lastDisplay = "";
+    const tick = () => {
+      updateTypingAnswerTimer();
+      const remaining = Math.max(0, state.answerTimerRemainingMs);
+      const display = `${(remaining / 1000).toFixed(1)} s`;
+      if (display !== lastDisplay) {
+        $("answer-time-label").textContent = display;
+        lastDisplay = display;
+      }
+      if (remaining <= 0) {
+        clearCountdown();
+        submitCurrentAnswer("timeout");
+        return true;
+      }
+      return false;
+    };
+    if (tick()) return;
+    state.timerTick = setInterval(tick, 40);
+  }
+
   function startCountdown(kind, remainingMs) {
     clearCountdown();
+    if (kind === "answer" && state.question?.answer_timer?.mode === "typing_pause") {
+      startTypingAwareCountdown(remainingMs);
+      return;
+    }
     state.timerKind = kind;
     state.timerDeadline = performance.now() + Math.max(0, Number(remainingMs || 0));
     let lastAnswerDisplay = "";
@@ -371,11 +426,43 @@
     state.timerTick = null;
     state.timerDeadline = null;
     state.timerKind = null;
+    state.answerTimerLastPerf = 0;
+    state.answerTimerPaused = false;
+    state.answerTimerPauseUntil = 0;
   }
 
   function remainingMs() {
+    if (state.timerKind === "answer" && state.question?.answer_timer?.mode === "typing_pause") {
+      updateTypingAnswerTimer();
+      return Math.max(0, Math.round(state.answerTimerRemainingMs));
+    }
     if (state.timerDeadline == null) return null;
     return Math.max(0, Math.round(state.timerDeadline - performance.now()));
+  }
+
+  function countAnswerKeystroke(event) {
+    if (state.phase !== "answer" || document.activeElement !== $("answer-input")) return;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const isBackspace = event.key === "Backspace" || event.key === "Delete";
+    const isPrintable = event.key && event.key.length === 1;
+    if (!isBackspace && !isPrintable) return;
+    state.answerKeystrokes += 1;
+
+    if (state.question?.answer_timer?.mode === "typing_pause") {
+      const now = performance.now();
+      updateTypingAnswerTimer(now);
+      if (isPrintable) {
+        const buffer = Number(state.question.answer_timer.typing_buffer_ms ?? 100);
+        state.answerTimerPaused = buffer > 0;
+        state.answerTimerPauseUntil = buffer > 0 ? now + buffer : 0;
+      } else {
+        // Backspace/Delete count as keystrokes, but do not pause the timer.
+        state.answerTimerPaused = false;
+        state.answerTimerPauseUntil = 0;
+      }
+      state.answerTimerLastPerf = now;
+    }
+    persistAnswerDraft();
   }
 
   function startHeartbeat() {
@@ -396,7 +483,8 @@
       audio_duration_ms: state.audioDurationMs,
       audio_ended: state.audioEnded,
       question_elapsed_ms: Math.round(getQuestionElapsed()),
-      answer_draft: draft
+      answer_draft: draft,
+      keystroke_count: state.phase === "answer" ? state.answerKeystrokes : 0
     };
     api(`/api/attempts/${encodeURIComponent(state.attemptId)}/heartbeat`, { method: "POST", body: JSON.stringify(body) })
       .catch(() => {});
@@ -449,19 +537,22 @@
     if (state.audio && !state.audioEnded) {
       setTimeout(() => { try { state.audio && state.audio.pause(); } catch {} }, stopDelay);
     }
+    state.answerKeystrokes = 0;
     showAnswerArea(Number(q.answer_seconds) * 1000, "");
     heartbeatNow();
     retryBuzz(pending);
   }
 
-  function showAnswerArea(durationMs, draft) {
+  function showAnswerArea(durationMs, draft, savedKeystrokes = 0) {
     state.phase = "answer";
     state.buzzPending = true;
     $("buzz-area").classList.add("hidden");
     $("answer-area").classList.remove("hidden");
     $("transition-area").classList.add("hidden");
     const localDraft = readPending(STORAGE.draft);
-    const chosenDraft = localDraft && localDraft.attempt_id === state.attemptId ? localDraft.answer : (draft || "");
+    const hasLocalDraft = localDraft && localDraft.attempt_id === state.attemptId;
+    const chosenDraft = hasLocalDraft ? localDraft.answer : (draft || "");
+    state.answerKeystrokes = hasLocalDraft ? Number(localDraft.keystrokes || 0) : Number(savedKeystrokes || 0);
     $("answer-input").value = chosenDraft || "";
     $("answer-time-label").textContent = "Answer window";
     $("saving-message").textContent = "";
@@ -511,7 +602,7 @@
     const total = Number(attempt.question.answer_seconds) * 1000;
     const remaining = attempt.phase_remaining_ms == null ? total : Number(attempt.phase_remaining_ms);
     const draft = attempt.answer_draft || "";
-    showAnswerArea(remaining, draft);
+    showAnswerArea(remaining, draft, attempt.keystroke_count || 0);
     const pending = readPending(STORAGE.pendingBuzz);
     if (pending && pending.attempt_id === attempt.id) retryBuzz(pending);
     const pendingSubmit = readPending(STORAGE.pendingSubmit);
@@ -533,6 +624,7 @@
       answer_text: answer,
       answer_time_ms: reason === "timeout" ? duration : Math.round(spent),
       total_question_time_ms: Math.round(getQuestionElapsed()),
+      keystroke_count: state.answerKeystrokes,
       reason
     };
     localStorage.setItem(STORAGE.pendingSubmit, JSON.stringify(body));
@@ -640,12 +732,20 @@
   }
 
   function keyHandler(event) {
+    if (state.phase === "answer" && document.activeElement === $("answer-input")) {
+      if (event.key === "Enter") {
+        state.answerKeystrokes += 1;
+        persistAnswerDraft();
+        event.preventDefault();
+        submitCurrentAnswer("enter");
+        return;
+      }
+      countAnswerKeystroke(event);
+      return;
+    }
     if (event.code === "Space" && state.phase === "question") {
       event.preventDefault();
       pressSpace();
-    } else if (event.code === "Enter" && state.phase === "answer" && document.activeElement === $("answer-input")) {
-      event.preventDefault();
-      submitCurrentAnswer("enter");
     }
   }
 
@@ -657,11 +757,15 @@
     renderHome();
   }
 
-  $("answer-input").addEventListener("input", () => {
+  function persistAnswerDraft() {
     if (state.attemptId) {
-      localStorage.setItem(STORAGE.draft, JSON.stringify({ attempt_id: state.attemptId, answer: $("answer-input").value }));
+      localStorage.setItem(STORAGE.draft, JSON.stringify({
+        attempt_id: state.attemptId, answer: $("answer-input").value, keystrokes: state.answerKeystrokes
+      }));
     }
-  });
+  }
+
+  $("answer-input").addEventListener("input", persistAnswerDraft);
 
   $("name-form").addEventListener("submit", async event => {
     event.preventDefault();
