@@ -34,6 +34,11 @@
     answerTimerLastPerf: 0,
     answerTimerPaused: false,
     answerTimerPauseUntil: 0,
+    timerWarningConfig: null,
+    timerWarningKind: null,
+    timerWarningFired: new Set(),
+    timerWarningTimeout: null,
+    warningAudioContext: null,
     phase: "home",
     submitting: false,
     buzzPending: false,
@@ -186,6 +191,7 @@
   }
 
   function renderQuestion(attempt) {
+    hideTimerWarning();
     showOnly("quiz-panel");
     clearError();
     state.phase = "question";
@@ -363,6 +369,115 @@
     state.answerTimerLastPerf = now;
   }
 
+  function timerWarningsFor(kind) {
+    if (kind === "prebuzz") return state.question?.pre_buzz?.warnings || null;
+    if (kind === "answer") return state.question?.answer_timer?.warnings || null;
+    return null;
+  }
+
+  function initializeTimerWarnings(kind, remainingMs) {
+    const config = timerWarningsFor(kind);
+    state.timerWarningKind = kind;
+    state.timerWarningConfig = config && Array.isArray(config.at_seconds) ? config : null;
+    state.timerWarningFired = new Set();
+    if (!state.timerWarningConfig) return;
+    // On resume, don't replay warnings whose thresholds have already passed.
+    for (const seconds of state.timerWarningConfig.at_seconds) {
+      if (Number(seconds) * 1000 > Number(remainingMs) + 1) {
+        state.timerWarningFired.add(Number(seconds));
+      }
+    }
+  }
+
+  function checkTimerWarnings(kind, remainingMs) {
+    if (state.timerWarningKind !== kind || !state.timerWarningConfig) return;
+    for (const rawSeconds of state.timerWarningConfig.at_seconds) {
+      const seconds = Number(rawSeconds);
+      if (state.timerWarningFired.has(seconds) || remainingMs > seconds * 1000) continue;
+      state.timerWarningFired.add(seconds);
+      showTimerWarning(seconds, kind);
+      playTimerWarningSound(state.timerWarningConfig.sound, state.timerWarningConfig.volume);
+    }
+  }
+
+  function showTimerWarning(seconds, kind) {
+    const box = $("timer-warning");
+    const label = $("timer-warning-text");
+    if (!box || !label) return;
+    const action = kind === "prebuzz" ? "left to buzz" : "left to answer";
+    label.textContent = `${seconds} second${seconds === 1 ? "" : "s"} ${action}`;
+    if (state.timerWarningTimeout) clearTimeout(state.timerWarningTimeout);
+    box.classList.add("hidden");
+    box.classList.remove("show");
+    // Force a layout so repeated threshold notices restart the short animation.
+    void box.offsetWidth;
+    box.classList.remove("hidden");
+    box.classList.add("show");
+    state.timerWarningTimeout = setTimeout(() => {
+      box.classList.remove("show");
+      box.classList.add("hidden");
+      state.timerWarningTimeout = null;
+    }, 1300);
+  }
+
+  function hideTimerWarning() {
+    const box = $("timer-warning");
+    if (state.timerWarningTimeout) clearTimeout(state.timerWarningTimeout);
+    state.timerWarningTimeout = null;
+    if (box) {
+      box.classList.remove("show");
+      box.classList.add("hidden");
+    }
+  }
+
+  function unlockWarningAudio() {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    try {
+      if (!state.warningAudioContext) state.warningAudioContext = new AudioContextClass();
+      if (state.warningAudioContext.state === "suspended") {
+        state.warningAudioContext.resume().catch(() => {});
+      }
+    } catch { /* The visual warning remains available if Web Audio is unavailable. */ }
+  }
+
+  function playTimerWarningSound(sound = "double_beep", volume = 0.8) {
+    unlockWarningAudio();
+    const context = state.warningAudioContext;
+    if (!context) return;
+    const patterns = {
+      short_beep: [{ hz: 1040, ms: 125 }],
+      double_beep: [{ hz: 940, ms: 85 }, { hz: 940, ms: 85, gap: 65 }],
+      high_beep: [{ hz: 1320, ms: 130 }],
+      low_beep: [{ hz: 620, ms: 155 }],
+      triple_beep: [{ hz: 1180, ms: 65 }, { hz: 900, ms: 65, gap: 55 }, { hz: 1180, ms: 65, gap: 55 }]
+    };
+    const pattern = patterns[sound] || patterns.double_beep;
+    const level = Math.max(0, Math.min(1, Number(volume ?? 0.8))) * 0.16;
+    if (level <= 0) return;
+    const play = () => {
+      if (context.state !== "running") return;
+      let startAt = context.currentTime + 0.01;
+      for (const tone of pattern) {
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.type = "triangle";
+        oscillator.frequency.setValueAtTime(tone.hz, startAt);
+        gain.gain.setValueAtTime(0.0001, startAt);
+        gain.gain.exponentialRampToValueAtTime(Math.max(0.001, level), startAt + 0.008);
+        gain.gain.setValueAtTime(Math.max(0.001, level), startAt + tone.ms / 1000 - 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, startAt + tone.ms / 1000);
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start(startAt);
+        oscillator.stop(startAt + tone.ms / 1000 + 0.01);
+        startAt += (tone.ms + (tone.gap || 35)) / 1000;
+      }
+    };
+    if (context.state === "suspended") context.resume().then(play).catch(() => {});
+    else play();
+  }
+
   function startTypingAwareCountdown(remainingMs) {
     state.timerKind = "answer";
     state.timerDeadline = null;
@@ -374,6 +489,7 @@
     const tick = () => {
       updateTypingAnswerTimer();
       const remaining = Math.max(0, state.answerTimerRemainingMs);
+      checkTimerWarnings("answer", remaining);
       const display = `${(remaining / 1000).toFixed(1)} s`;
       if (display !== lastDisplay) {
         $("answer-time-label").textContent = display;
@@ -392,15 +508,18 @@
 
   function startCountdown(kind, remainingMs) {
     clearCountdown();
+    const initialRemaining = Math.max(0, Number(remainingMs || 0));
+    initializeTimerWarnings(kind, initialRemaining);
     if (kind === "answer" && state.question?.answer_timer?.mode === "typing_pause") {
-      startTypingAwareCountdown(remainingMs);
+      startTypingAwareCountdown(initialRemaining);
       return;
     }
     state.timerKind = kind;
-    state.timerDeadline = performance.now() + Math.max(0, Number(remainingMs || 0));
+    state.timerDeadline = performance.now() + initialRemaining;
     let lastAnswerDisplay = "";
     const tick = () => {
       const remaining = Math.max(0, state.timerDeadline - performance.now());
+      if (kind === "prebuzz" || kind === "answer") checkTimerWarnings(kind, remaining);
       if (kind === "answer") {
         const display = `${(remaining / 1000).toFixed(1)} s`;
         if (display !== lastAnswerDisplay) {
@@ -544,6 +663,7 @@
   }
 
   function showAnswerArea(durationMs, draft, savedKeystrokes = 0) {
+    hideTimerWarning();
     state.phase = "answer";
     state.buzzPending = true;
     $("buzz-area").classList.add("hidden");
@@ -679,6 +799,7 @@
   }
 
   function renderTransition(remaining) {
+    hideTimerWarning();
     stopAudioOnly();
     state.phase = "transition";
     $("buzz-area").classList.add("hidden");
@@ -718,6 +839,7 @@
   }
 
   function finishScreen() {
+    hideTimerWarning();
     stopRuntime();
     state.phase = "complete";
     localStorage.removeItem(STORAGE.attempt);
@@ -782,6 +904,8 @@
     stopRuntime(); state.phase = "home"; renderHome();
   });
   $("back-to-quizzes").addEventListener("click", finishToHome);
+  document.addEventListener("pointerdown", unlockWarningAudio, { once: true, capture: true });
+  document.addEventListener("keydown", unlockWarningAudio, { once: true, capture: true });
   document.addEventListener("keydown", keyHandler);
   window.addEventListener("beforeunload", heartbeatNow);
 

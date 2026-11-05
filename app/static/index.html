@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Fossil Ridge Science Bowl</title>
   <link rel="stylesheet" href="/static/style.css">
-  <script defer src="https://analytics.open-domains.com/script.js" data-website-id="26a87db1-abfc-4b48-9246-c739c39c2792"></script>
 </head>
 <body>
   <header class="site-header">
     <div class="header-inner">
       <a class="wordmark" href="/" aria-label="Fossil Ridge Science Bowl home">Fossil Ridge Science Bowl</a>
+      <span class="header-note">Science Bowl practice</span>
     </div>
   </header>
 
@@ -30,6 +30,7 @@
     <section id="home-panel" class="hidden">
       <div class="home-intro">
         <div>
+          <p class="eyebrow">Student area</p>
           <h1 id="welcome-heading">Choose a quiz</h1>
           <p class="muted">Your name is saved on this device. Each quiz can only be submitted once under a name.</p>
         </div>
@@ -47,6 +48,10 @@
       <div class="question-panel">
         <p id="question-number" class="question-number">Question 1</p>
         <h1 id="question-prompt" class="question-prompt">Question 1</h1>
+        <div id="timer-warning" class="timer-warning hidden" role="status" aria-live="assertive">
+          <span class="timer-warning-mark" aria-hidden="true">!</span>
+          <span id="timer-warning-text">10 seconds remaining</span>
+        </div>
         <div id="audio-status" class="audio-status hidden" aria-live="polite">
           <span class="audio-dot"></span><span id="audio-status-text">Listen to the question.</span>
         </div>

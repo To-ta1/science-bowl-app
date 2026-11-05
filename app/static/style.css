@@ -69,3 +69,25 @@ kbd { display: inline-block; min-width: 70px; text-align: center; background: #f
 .site-footer { max-width: 1120px; margin: 0 auto; padding: 18px 28px 24px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
 .site-footer a { text-decoration: none; }
 @media (max-width: 759px) { .page-shell { display: none; } .desktop-warning { display: block !important; margin: 50px 20px; } }
+
+/* Brief, high-contrast timer warning shown when a configured threshold is reached. */
+.timer-warning {
+  width: fit-content; max-width: 100%; margin: 20px auto 8px; padding: 12px 22px;
+  display: flex; align-items: center; justify-content: center; gap: 11px;
+  color: #7d261f; background: #fff0e9; border: 2px solid #c94d3d; border-radius: 5px;
+  font-size: 18px; font-weight: 800; letter-spacing: .2px; text-align: center;
+  box-shadow: 0 3px 12px rgba(111, 37, 25, .14);
+}
+.timer-warning-mark {
+  flex: 0 0 25px; width: 25px; height: 25px; display: inline-grid; place-items: center;
+  border-radius: 50%; color: #fff; background: #b83f32; font-size: 17px; line-height: 1;
+}
+.timer-warning.show { animation: timer-warning-pop 1.25s ease-out both; }
+@keyframes timer-warning-pop {
+  0% { opacity: 0; transform: translateY(7px) scale(.96); }
+  12% { opacity: 1; transform: translateY(0) scale(1.02); }
+  22% { transform: scale(1); }
+  82% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-4px); }
+}
+@media (prefers-reduced-motion: reduce) { .timer-warning.show { animation: none; } }
