@@ -79,6 +79,7 @@ class QuestionResult(Base):
     buzz_before_audio_end: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     buzz_within_500ms_before_audio_end: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     audio_stop_delay_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    keystroke_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     attempt: Mapped[Attempt] = relationship(back_populates="results")

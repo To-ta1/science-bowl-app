@@ -116,6 +116,10 @@ class QuizRepository:
         if not title or len(title) > 200:
             raise QuizRepositoryError(f"{folder_slug}: title is required and must be 200 characters or fewer.")
         description = str(data.get("description") or "").strip()
+        password = data.get("password")
+        if password is not None:
+            if not isinstance(password, str) or not password or len(password) > 128:
+                raise QuizRepositoryError(f"{folder_slug}: password must be a non-empty string of at most 128 characters, or omitted.")
         questions = data.get("questions")
         if not isinstance(questions, list) or not questions:
             raise QuizRepositoryError(f"{folder_slug}: questions must be a non-empty array.")
@@ -171,21 +175,39 @@ class QuizRepository:
             if not 1 <= answer_seconds <= 300:
                 raise QuizRepositoryError(f"{folder_slug}: answer_seconds for {qid} must be between 1 and 300.")
 
+            answer_timer = item.get("answer_timer", {})
+            if not isinstance(answer_timer, dict):
+                raise QuizRepositoryError(f"{folder_slug}: answer_timer for {qid} must be an object.")
+            answer_timer_mode = str(answer_timer.get("mode", "countdown"))
+            if answer_timer_mode not in {"countdown", "typing_pause"}:
+                raise QuizRepositoryError(f"{folder_slug}: answer_timer.mode for {qid} must be countdown or typing_pause.")
+            typing_buffer_ms = answer_timer.get("typing_buffer_ms", 100)
+            try:
+                typing_buffer_ms = int(typing_buffer_ms)
+            except (TypeError, ValueError):
+                raise QuizRepositoryError(f"{folder_slug}: answer_timer.typing_buffer_ms for {qid} must be an integer.")
+            if not 0 <= typing_buffer_ms <= 1000:
+                raise QuizRepositoryError(f"{folder_slug}: answer_timer.typing_buffer_ms for {qid} must be between 0 and 1000.")
+
             normalized_questions.append({
                 "id": qid,
                 "prompt": prompt,
                 "audio": audio,
                 "pre_buzz": {"mode": mode, "seconds": seconds},
                 "answer_seconds": answer_seconds,
+                "answer_timer": {"mode": answer_timer_mode, "typing_buffer_ms": typing_buffer_ms},
             })
 
-        return {
+        result = {
             "slug": slug,
             "title": title,
             "description": description,
             "inter_question_delay_seconds": delay,
             "questions": normalized_questions,
         }
+        if password is not None:
+            result["password"] = password
+        return result
 
     def _load_local_quiz(self, slug: str) -> dict:
         assert self.local_root is not None
@@ -245,6 +267,7 @@ class QuizRepository:
                     "description": quiz["description"],
                     "question_count": len(quiz["questions"]),
                     "inter_question_delay_seconds": quiz["inter_question_delay_seconds"],
+                    "password_required": bool(quiz.get("password")),
                 })
             except Exception as exc:
                 errors.append(f"{slug}: {exc}")

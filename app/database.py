@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 
@@ -33,3 +33,10 @@ def init_db() -> None:
     # Import models before create_all so all tables are registered.
     from app import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
+    # Additive migration: existing question_results tables predate keystroke_count.
+    columns = {column["name"] for column in inspect(engine).get_columns("question_results")}
+    if "keystroke_count" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text(
+                "ALTER TABLE question_results ADD COLUMN keystroke_count INTEGER NOT NULL DEFAULT 0"
+            ))

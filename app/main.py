@@ -55,6 +55,7 @@ class ParticipantIn(BaseModel):
 class AttemptIn(BaseModel):
     participant_id: str
     quiz_slug: str
+    password: str | None = Field(default=None, max_length=128)
 
 
 class HeartbeatIn(BaseModel):
@@ -65,6 +66,7 @@ class HeartbeatIn(BaseModel):
     audio_duration_ms: int | None = None
     audio_ended: bool | None = None
     answer_draft: str | None = Field(default=None, max_length=10000)
+    keystroke_count: int | None = Field(default=None, ge=0, le=1000000)
 
 
 class BuzzIn(BaseModel):
@@ -81,6 +83,7 @@ class SubmitIn(BaseModel):
     answer_text: str = Field(default="", max_length=10000)
     answer_time_ms: int = 0
     total_question_time_ms: int = 0
+    keystroke_count: int = Field(default=0, ge=0, le=1000000)
     reason: str = "enter"
 
 
@@ -137,8 +140,10 @@ def safe_attempt_payload(attempt: Attempt, include_state: bool = True) -> dict:
         "inter_question_delay_seconds": (attempt.quiz_snapshot or {}).get("inter_question_delay_seconds", 2),
     }
     if include_state and attempt.status == "in_progress":
+        current_result = next((r for r in attempt.results if r.question_index == attempt.current_question_index), None)
         payload.update({
             "question": current_question(attempt),
+            "keystroke_count": current_result.keystroke_count if current_result else 0,
             "phase_remaining_ms": attempt.phase_remaining_ms,
             "audio_elapsed_ms": attempt.audio_elapsed_ms,
             "question_elapsed_ms": attempt.question_elapsed_ms,
@@ -379,6 +384,13 @@ def create_attempt(body: AttemptIn, db: Session = Depends(get_db)):
         quiz = repo.get_quiz(body.quiz_slug)
     except QuizRepositoryError as exc:
         raise HTTPException(404, str(exc))
+    expected_password = quiz.get("password")
+    if expected_password is not None:
+        supplied_password = body.password or ""
+        if not hmac.compare_digest(supplied_password.encode("utf-8"), expected_password.encode("utf-8")):
+            raise HTTPException(403, "Incorrect quiz password.")
+    # Never copy the private quiz password into the persistent attempt snapshot.
+    quiz_snapshot = {key: value for key, value in quiz.items() if key != "password"}
     normalized = normalize_name(person.name)
     existing = db.scalar(select(Attempt).where(Attempt.quiz_slug == quiz["slug"], Attempt.normalized_name == normalized))
     if existing:
@@ -386,7 +398,7 @@ def create_attempt(body: AttemptIn, db: Session = Depends(get_db)):
             raise HTTPException(409, "A person using this name has already started this quiz. Use your own name or ask the administrator for help.")
         return safe_attempt_payload(existing)
     attempt = Attempt(
-        id=str(uuid.uuid4()), quiz_slug=quiz["slug"], quiz_title=quiz["title"], quiz_snapshot=quiz,
+        id=str(uuid.uuid4()), quiz_slug=quiz["slug"], quiz_title=quiz["title"], quiz_snapshot=quiz_snapshot,
         participant_id=person.id, student_name=person.name, normalized_name=normalized,
         status="in_progress", current_question_index=0, phase="question",
         question_started_at=utc_now(),
@@ -455,6 +467,13 @@ def heartbeat(attempt_id: str, body: HeartbeatIn, db: Session = Depends(get_db))
         ))
         if result and result.status == "buzzed":
             result.answer_text = body.answer_draft
+    if body.keystroke_count is not None:
+        result = db.scalar(select(QuestionResult).where(
+            QuestionResult.attempt_id == attempt.id,
+            QuestionResult.question_index == attempt.current_question_index,
+        ))
+        if result and result.status == "buzzed":
+            result.keystroke_count = body.keystroke_count
     attempt.updated_at = utc_now()
     db.commit()
     mark_backup_dirty()
@@ -570,6 +589,7 @@ def submit_answer(attempt_id: str, body: SubmitIn, db: Session = Depends(get_db)
     result.submitted_at = now
     result.answer_time_ms = clamp_ms(body.answer_time_ms, 0, int(float(question["answer_seconds"]) * 1000) + 2000)
     result.total_question_time_ms = clamp_ms(body.total_question_time_ms, 0, 6 * 60 * 60 * 1000)
+    result.keystroke_count = body.keystroke_count
     attempt.answer_draft = answer
     transition_after_result(attempt)
     attempt.updated_at = now
@@ -704,6 +724,7 @@ def admin_attempt_detail(attempt_id: str, request: Request, db: Session = Depend
              "buzz_before_audio_end": r.buzz_before_audio_end,
              "buzz_within_500ms_before_audio_end": r.buzz_within_500ms_before_audio_end,
              "audio_stop_delay_ms": r.audio_stop_delay_ms,
+             "keystroke_count": r.keystroke_count,
              "buzzed_at": r.buzzed_at.isoformat() if r.buzzed_at else None,
              "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None}
             for r in results
@@ -716,25 +737,26 @@ def admin_export(request: Request, db: Session = Depends(get_db)):
     require_admin(request)
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([
+    header = [
         "student_name", "quiz_title", "quiz_slug", "attempt_status", "question_number", "question_id",
         "prompt", "question_status", "answer_text", "time_to_buzz_ms", "answer_time_ms",
         "total_question_time_ms", "audio_duration_ms", "audio_elapsed_at_buzz_ms",
         "audio_remaining_at_buzz_ms", "buzz_before_audio_end", "buzz_within_500ms_before_audio_end",
-        "audio_stop_delay_ms", "buzzed_at", "submitted_at", "attempt_created_at", "attempt_completed_at",
-    ])
+        "audio_stop_delay_ms", "keystroke_count", "buzzed_at", "submitted_at", "attempt_created_at", "attempt_completed_at",
+    ]
+    writer.writerow(header)
     attempts = _admin_attempt_query(db)
     for a in attempts:
         results = db.scalars(select(QuestionResult).where(QuestionResult.attempt_id == a.id).order_by(QuestionResult.question_index)).all()
         if not results:
-            writer.writerow([a.student_name, a.quiz_title, a.quiz_slug, a.status, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", a.created_at.isoformat(), a.completed_at.isoformat() if a.completed_at else ""])
+            writer.writerow([a.student_name, a.quiz_title, a.quiz_slug, a.status] + [""] * (len(header) - 6) + [a.created_at.isoformat(), a.completed_at.isoformat() if a.completed_at else ""])
         for r in results:
             writer.writerow([
                 a.student_name, a.quiz_title, a.quiz_slug, a.status, r.question_index + 1, r.question_id,
                 r.prompt, r.status, r.answer_text, r.time_to_buzz_ms, r.answer_time_ms,
                 r.total_question_time_ms, r.audio_duration_ms, r.audio_elapsed_at_buzz_ms,
                 r.audio_remaining_at_buzz_ms, r.buzz_before_audio_end, r.buzz_within_500ms_before_audio_end,
-                r.audio_stop_delay_ms, r.buzzed_at.isoformat() if r.buzzed_at else "",
+                r.audio_stop_delay_ms, r.keystroke_count, r.buzzed_at.isoformat() if r.buzzed_at else "",
                 r.submitted_at.isoformat() if r.submitted_at else "", a.created_at.isoformat(),
                 a.completed_at.isoformat() if a.completed_at else "",
             ])
